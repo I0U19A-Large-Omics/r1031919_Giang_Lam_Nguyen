@@ -1,0 +1,19 @@
+rule all:
+    input:
+        "030.output/output.tsv"
+
+rule calc_gc:
+    input:
+        "{sample}.fa"
+    output:
+        "030.output/{sample}.gc.tsv"
+    shell:
+        "grep -v '>' {input} | tr -d '\n' | awk '{{gc=gsub(/[GCgc]/,\"&\"); total=length($0); print \"{wildcards.sample}\\t\" (gc/total)*100}}' > {output}"
+
+rule create_tsv:
+    input:
+        expand("030.output/{sample}.gc.tsv", sample=["test1","test2"])
+    output:
+        "030.output/output.tsv"
+    shell:
+        "cat {input} > {output}"
