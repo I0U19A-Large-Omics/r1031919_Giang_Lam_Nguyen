@@ -1,0 +1,10 @@
+name: snpcalling
+channels:
+  - bioconda
+  - conda-forge
+dependencies:
+  - snakemake
+  - bwa
+  - samtools
+  - bcftools
+  - fastqc

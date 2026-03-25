@@ -1,0 +1,227 @@
+configfile: "config.yaml"
+
+NORMAL = config["sample_normal"]
+TUMOR = config["sample_tumor"]
+REF = config["reference"]
+SNPEFF_JAR = "/lustre1/project/stg_00079/teaching/I0U19a_conda_2026/share/snpeff-5.4.0a-0/snpEff.jar"
+
+rule all:
+    input:
+        "01.fastqc/TLE66_N_fastqc.html",
+        "01.fastqc/TLE66_T_fastqc.html",
+        "100.final/snps.annotated.tsv"
+
+rule test_inputs:
+    input:
+        normal=f"{NORMAL}.fastq",
+        tumor=f"{TUMOR}.fastq",
+        ref=REF
+    output:
+        touch("00.logs/test_inputs.ok")
+    shell:
+        r"""
+        mkdir -p 00.logs
+        test -s {input.normal}
+        test -s {input.tumor}
+        test -s {input.ref}
+        head -n 1 {input.normal} | grep '^@' >/dev/null
+        head -n 1 {input.tumor} | grep '^@' >/dev/null
+        grep '^>' {input.ref} >/dev/null
+        touch {output}
+        """
+
+rule fastqc:
+    input:
+        normal=f"{NORMAL}.fastq",
+        tumor=f"{TUMOR}.fastq",
+        test="00.logs/test_inputs.ok"
+    output:
+        normal_html=f"01.fastqc/{NORMAL}_fastqc.html",
+        normal_zip=f"01.fastqc/{NORMAL}_fastqc.zip",
+        tumor_html=f"01.fastqc/{TUMOR}_fastqc.html",
+        tumor_zip=f"01.fastqc/{TUMOR}_fastqc.zip"
+    log:
+        "00.logs/fastqc.log"
+    shell:
+        r"""
+        mkdir -p 01.fastqc 00.logs
+        fastqc {input.normal} {input.tumor} --outdir 01.fastqc > {log} 2>&1
+        test -s {output.normal_html}
+        test -s {output.tumor_html}
+        """
+
+rule bwa_index:
+    input:
+        ref=REF,
+        test="00.logs/test_inputs.ok"
+    output:
+        amb=f"{REF}.amb",
+        ann=f"{REF}.ann",
+        bwt=f"{REF}.bwt",
+        pac=f"{REF}.pac",
+        sa=f"{REF}.sa"
+    log:
+        "00.logs/bwa_index.log"
+    shell:
+        r"""
+        bwa index {input.ref} > {log} 2>&1
+        test -s {output.bwt}
+        """
+
+rule faidx:
+    input:
+        REF
+    output:
+        f"{REF}.fai"
+    log:
+        "00.logs/faidx.log"
+    shell:
+        r"""
+        samtools faidx {input} > {log} 2>&1
+        test -s {output}
+        """
+
+rule map_normal:
+    input:
+        fastq=f"{NORMAL}.fastq",
+        ref=REF,
+        idx=rules.bwa_index.output,
+        fai=rules.faidx.output
+    output:
+        bam=f"10.bam/{NORMAL}.bam"
+    log:
+        "00.logs/map_normal.log"
+    threads: 2
+    shell:
+        r"""
+        mkdir -p 10.bam 00.logs
+        bwa mem -t {threads} {input.ref} {input.fastq} 2> {log} | samtools view -b -o {output.bam}
+        test -s {output.bam}
+        """
+
+rule map_tumor:
+    input:
+        fastq=f"{TUMOR}.fastq",
+        ref=REF,
+        idx=rules.bwa_index.output,
+        fai=rules.faidx.output
+    output:
+        bam=f"10.bam/{TUMOR}.bam"
+    log:
+        "00.logs/map_tumor.log"
+    threads: 2
+    shell:
+        r"""
+        mkdir -p 10.bam 00.logs
+        bwa mem -t {threads} {input.ref} {input.fastq} 2> {log} | samtools view -b -o {output.bam}
+        test -s {output.bam}
+        """
+
+rule sort_normal:
+    input:
+        bam=f"10.bam/{NORMAL}.bam"
+    output:
+        bam=f"20.sorted/{NORMAL}.sorted.bam",
+        bai=f"20.sorted/{NORMAL}.sorted.bam.bai"
+    log:
+        "00.logs/sort_normal.log"
+    threads: 2
+    shell:
+        r"""
+        mkdir -p 20.sorted 00.logs
+        samtools sort -@ {threads} -o {output.bam} {input.bam} > {log} 2>&1
+        samtools index {output.bam}
+        test -s {output.bam}
+        test -s {output.bai}
+        samtools quickcheck {output.bam}
+        """
+
+rule sort_tumor:
+    input:
+        bam=f"10.bam/{TUMOR}.bam"
+    output:
+        bam=f"20.sorted/{TUMOR}.sorted.bam",
+        bai=f"20.sorted/{TUMOR}.sorted.bam.bai"
+    log:
+        "00.logs/sort_tumor.log"
+    threads: 2
+    shell:
+        r"""
+        mkdir -p 20.sorted 00.logs
+        samtools sort -@ {threads} -o {output.bam} {input.bam} > {log} 2>&1
+        samtools index {output.bam}
+        test -s {output.bam}
+        test -s {output.bai}
+        samtools quickcheck {output.bam}
+        """
+
+rule call_raw_snps:
+    input:
+        tumor_bam=f"20.sorted/{TUMOR}.sorted.bam",
+        tumor_bai=f"20.sorted/{TUMOR}.sorted.bam.bai",
+        normal_bam=f"20.sorted/{NORMAL}.sorted.bam",
+        normal_bai=f"20.sorted/{NORMAL}.sorted.bam.bai",
+        ref=REF,
+        fai=rules.faidx.output
+    output:
+        "30.variants/raw_snps.vcf"
+    log:
+        "00.logs/call_raw_snps.log"
+    shell:
+        r"""
+        mkdir -p 30.variants 00.logs
+        bcftools mpileup -f {input.ref} {input.tumor_bam} {input.normal_bam} 2> {log} \
+          | bcftools call -mv -Ov -o {output} >> {log} 2>&1
+        test -s {output}
+        grep '^#CHROM' {output} >/dev/null
+        """
+
+rule clean_snps:
+    input:
+        "30.variants/raw_snps.vcf"
+    output:
+        "40.cleaned/clean_snps.vcf"
+    log:
+        "00.logs/clean_snps.log"
+    shell:
+        r"""
+        mkdir -p 40.cleaned 00.logs
+        bcftools view -v snps {input} | bcftools filter -e 'QUAL<20' -Ov -o {output} > {log} 2>&1
+        test -s {output}
+        grep '^#CHROM' {output} >/dev/null
+        """
+
+rule snpeff_annotate:
+    input:
+        "40.cleaned/clean_snps.vcf"
+    output:
+        vcf="50.annotated/annotated_snps.vcf",
+        html="50.annotated/snpEff_summary.html"
+    log:
+        "00.logs/snpeff_annotate.log"
+    shell:
+        r"""
+        mkdir -p 50.annotated 00.logs
+        java -Xmx3400m -jar {SNPEFF_JAR} eff hg19 -dataDir /staging/leuven/stg_00079/teaching/snpeff_db {input} \
+          -s {output.html} \
+          > {output.vcf} 2> {log}
+        test -s {output.vcf}
+        test -s {output.html}
+        grep '^#' {output.vcf} >/dev/null
+        grep 'ANN=' {output.vcf} >/dev/null
+        """
+
+rule export_final_tsv:
+    input:
+        "50.annotated/annotated_snps.vcf"
+    output:
+        "100.final/snps.annotated.tsv"
+    log:
+        "00.logs/export_final_tsv.log"
+    shell:
+        r"""
+        mkdir -p 100.final 00.logs
+        bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\t%QUAL\t%INFO/ANN\n' {input} > {output} 2> {log}
+        test -s {output}
+        awk 'BEGIN{{FS=OFS="\t"; ok=0}} NF>=6 {{ok=1; exit}} END{{exit(ok?0:1)}}' {output}
+        """
