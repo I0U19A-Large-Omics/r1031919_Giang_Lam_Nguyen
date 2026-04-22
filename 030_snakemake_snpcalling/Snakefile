@@ -9,7 +9,8 @@ rule all:
     input:
         "01.fastqc/TLE66_N_fastqc.html",
         "01.fastqc/TLE66_T_fastqc.html",
-        "100.final/snps.annotated.tsv"
+        "100.final/snps.annotated.tsv",
+        "150.db/snps.sqlite"
 
 rule test_inputs:
     input:
@@ -225,3 +226,58 @@ rule export_final_tsv:
         test -s {output}
         awk 'BEGIN{{FS=OFS="\t"; ok=0}} NF>=6 {{ok=1; exit}} END{{exit(ok?0:1)}}' {output}
         """
+
+
+
+rule load_sqlite_db:
+
+    input:
+
+        vcf="50.annotated/annotated_snps.vcf"
+
+    output:
+
+        db="150.db/snps.sqlite"
+
+    log:
+
+        "00.logs/load_sqlite_db.log"
+
+    conda:
+
+        "envs/snpcalling.yaml"
+
+    shell:
+
+        r"""
+
+        mkdir -p 150.db 00.logs
+
+
+
+        python scripts/vcf_to_sqlite.py \
+
+            --vcf {input.vcf} \
+
+            --db {output.db} \
+
+            > {log} 2>&1
+
+
+
+        test -s {output.db}
+
+
+
+        python3 - <<'PYTHON_CHECK'
+import sqlite3
+conn = sqlite3.connect('{output.db}')
+cur = conn.cursor()
+assert cur.execute("SELECT COUNT(*) FROM SNP;").fetchone()[0] > 0
+assert cur.execute("SELECT COUNT(*) FROM Call WHERE gt IS NULL OR length(gt)=0;").fetchone()[0] == 0
+assert cur.execute("SELECT COUNT(*) FROM Effect e LEFT JOIN SNP s ON e.snp_id = s.snp_id WHERE s.snp_id IS NULL;").fetchone()[0] == 0
+conn.close()
+PYTHON_CHECK
+
+        """
+
