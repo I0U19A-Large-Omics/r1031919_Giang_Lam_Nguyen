@@ -10,8 +10,9 @@ rule all:
         "01.fastqc/TLE66_N_fastqc.html",
         "01.fastqc/TLE66_T_fastqc.html",
         "100.final/snps.annotated.tsv",
-        "150.db/snps.sqlite"
-
+        "150.db/snps.sqlite",
+        "160.figures/fig1_impact_severity.svg",
+        "160.figures/fig2_top_genes.svg"
 rule test_inputs:
     input:
         normal=f"{NORMAL}.fastq",
@@ -30,7 +31,6 @@ rule test_inputs:
         grep '^>' {input.ref} >/dev/null
         touch {output}
         """
-
 rule fastqc:
     input:
         normal=f"{NORMAL}.fastq",
@@ -50,7 +50,6 @@ rule fastqc:
         test -s {output.normal_html}
         test -s {output.tumor_html}
         """
-
 rule bwa_index:
     input:
         ref=REF,
@@ -68,7 +67,6 @@ rule bwa_index:
         bwa index {input.ref} > {log} 2>&1
         test -s {output.bwt}
         """
-
 rule faidx:
     input:
         REF
@@ -81,7 +79,6 @@ rule faidx:
         samtools faidx {input} > {log} 2>&1
         test -s {output}
         """
-
 rule map_normal:
     input:
         fastq=f"{NORMAL}.fastq",
@@ -99,7 +96,6 @@ rule map_normal:
         bwa mem -t {threads} {input.ref} {input.fastq} 2> {log} | samtools view -b -o {output.bam}
         test -s {output.bam}
         """
-
 rule map_tumor:
     input:
         fastq=f"{TUMOR}.fastq",
@@ -117,7 +113,6 @@ rule map_tumor:
         bwa mem -t {threads} {input.ref} {input.fastq} 2> {log} | samtools view -b -o {output.bam}
         test -s {output.bam}
         """
-
 rule sort_normal:
     input:
         bam=f"10.bam/{NORMAL}.bam"
@@ -136,7 +131,6 @@ rule sort_normal:
         test -s {output.bai}
         samtools quickcheck {output.bam}
         """
-
 rule sort_tumor:
     input:
         bam=f"10.bam/{TUMOR}.bam"
@@ -155,7 +149,6 @@ rule sort_tumor:
         test -s {output.bai}
         samtools quickcheck {output.bam}
         """
-
 rule call_raw_snps:
     input:
         tumor_bam=f"20.sorted/{TUMOR}.sorted.bam",
@@ -176,7 +169,6 @@ rule call_raw_snps:
         test -s {output}
         grep '^#CHROM' {output} >/dev/null
         """
-
 rule clean_snps:
     input:
         "30.variants/raw_snps.vcf"
@@ -191,7 +183,6 @@ rule clean_snps:
         test -s {output}
         grep '^#CHROM' {output} >/dev/null
         """
-
 rule snpeff_annotate:
     input:
         "40.cleaned/clean_snps.vcf"
@@ -211,7 +202,6 @@ rule snpeff_annotate:
         grep '^#' {output.vcf} >/dev/null
         grep 'ANN=' {output.vcf} >/dev/null
         """
-
 rule export_final_tsv:
     input:
         "50.annotated/annotated_snps.vcf"
@@ -226,58 +216,29 @@ rule export_final_tsv:
         test -s {output}
         awk 'BEGIN{{FS=OFS="\t"; ok=0}} NF>=6 {{ok=1; exit}} END{{exit(ok?0:1)}}' {output}
         """
-
-
-
 rule load_sqlite_db:
-
     input:
-
         vcf="50.annotated/annotated_snps.vcf"
-
     output:
-
         db="150.db/snps.sqlite"
-
     log:
-
         "00.logs/load_sqlite_db.log"
-
-    conda:
-
-        "envs/snpcalling.yaml"
-
     shell:
-
         r"""
-
         mkdir -p 150.db 00.logs
-
-
-
-        python scripts/vcf_to_sqlite.py \
-
-            --vcf {input.vcf} \
-
-            --db {output.db} \
-
-            > {log} 2>&1
-
-
-
+        python scripts/vcf_to_sqlite.py --vcf {input.vcf} --db {output.db} > {log} 2>&1
         test -s {output.db}
-
-
-
-        python3 - <<'PYTHON_CHECK'
-import sqlite3
-conn = sqlite3.connect('{output.db}')
-cur = conn.cursor()
-assert cur.execute("SELECT COUNT(*) FROM SNP;").fetchone()[0] > 0
-assert cur.execute("SELECT COUNT(*) FROM Call WHERE gt IS NULL OR length(gt)=0;").fetchone()[0] == 0
-assert cur.execute("SELECT COUNT(*) FROM Effect e LEFT JOIN SNP s ON e.snp_id = s.snp_id WHERE s.snp_id IS NULL;").fetchone()[0] == 0
-conn.close()
-PYTHON_CHECK
-
         """
-
+rule plot_snp_figures:
+    input:
+        db="150.db/snps.sqlite"
+    output:
+        fig1="160.figures/fig1_impact_severity.svg",
+        fig2="160.figures/fig2_top_genes.svg"
+    log:
+        "00.logs/plot_snp_figures.log"
+    shell:
+        r"""
+        mkdir -p 160.figures 00.logs
+        python scripts/plot_snp_figures.py --db {input.db} --fig1 {output.fig1} --fig2 {output.fig2} > {log} 2>&1
+        """

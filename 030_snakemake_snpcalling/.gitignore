@@ -41,3 +41,17 @@
 
 .snakemake/
 
+
+160.figures/*.svg
+
+160.figures/*.pdf
+
+160.figures/*.png
+
+150.db/*.sqlite
+
+
+TLE66_N.fastq
+
+TLE66_T.fastq
+
