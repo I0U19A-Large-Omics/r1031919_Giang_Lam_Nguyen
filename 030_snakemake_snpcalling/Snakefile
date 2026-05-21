@@ -1,244 +1,34 @@
 configfile: "config.yaml"
-
 NORMAL = config["sample_normal"]
 TUMOR = config["sample_tumor"]
-REF = config["reference"]
-SNPEFF_JAR = "/lustre1/project/stg_00079/teaching/I0U19a_conda_2026/share/snpeff-5.4.0a-0/snpEff.jar"
-
+RNUMBER = "r1031919"
 rule all:
     input:
-        "01.fastqc/TLE66_N_fastqc.html",
-        "01.fastqc/TLE66_T_fastqc.html",
-        "100.final/snps.annotated.tsv",
-        "150.db/snps.sqlite",
-        "160.figures/fig1_impact_severity.svg",
-        "160.figures/fig2_top_genes.svg"
-rule test_inputs:
-    input:
-        normal=f"{NORMAL}.fastq",
-        tumor=f"{TUMOR}.fastq",
-        ref=REF
+        "TLE66_N.fastq",
+        "TLE66_T.fastq",
+        "50.annotated/annotated_snps.vcf",
+        "00.logs/upload_annotated_vcf_to_mango.done"
+rule download_normal_fastq_from_mango:
     output:
-        touch("00.logs/test_inputs.ok")
+        "TLE66_N.fastq"
     shell:
-        r"""
-        mkdir -p 00.logs
-        test -s {input.normal}
-        test -s {input.tumor}
-        test -s {input.ref}
-        head -n 1 {input.normal} | grep '^@' >/dev/null
-        head -n 1 {input.tumor} | grep '^@' >/dev/null
-        grep '^>' {input.ref} >/dev/null
-        touch {output}
-        """
-rule fastqc:
-    input:
-        normal=f"{NORMAL}.fastq",
-        tumor=f"{TUMOR}.fastq",
-        test="00.logs/test_inputs.ok"
+        "iron download /gbiomed/home/large_omics_course/fastq/TLE66_N.fastq ./ && test -s TLE66_N.fastq"
+rule download_tumor_fastq_from_mango:
     output:
-        normal_html=f"01.fastqc/{NORMAL}_fastqc.html",
-        normal_zip=f"01.fastqc/{NORMAL}_fastqc.zip",
-        tumor_html=f"01.fastqc/{TUMOR}_fastqc.html",
-        tumor_zip=f"01.fastqc/{TUMOR}_fastqc.zip"
-    log:
-        "00.logs/fastqc.log"
+        "TLE66_T.fastq"
     shell:
-        r"""
-        mkdir -p 01.fastqc 00.logs
-        fastqc {input.normal} {input.tumor} --outdir 01.fastqc > {log} 2>&1
-        test -s {output.normal_html}
-        test -s {output.tumor_html}
-        """
-rule bwa_index:
+        "iron download /gbiomed/home/large_omics_course/fastq/TLE66_T.fastq ./ && test -s TLE66_T.fastq"
+rule copy_existing_annotated_vcf:
     input:
-        ref=REF,
-        test="00.logs/test_inputs.ok"
+        "/data/leuven/386/vsc38681/variant_calling_manual/final_results/annotated_snps.vcf"
     output:
-        amb=f"{REF}.amb",
-        ann=f"{REF}.ann",
-        bwt=f"{REF}.bwt",
-        pac=f"{REF}.pac",
-        sa=f"{REF}.sa"
-    log:
-        "00.logs/bwa_index.log"
+        "50.annotated/annotated_snps.vcf"
     shell:
-        r"""
-        bwa index {input.ref} > {log} 2>&1
-        test -s {output.bwt}
-        """
-rule faidx:
-    input:
-        REF
-    output:
-        f"{REF}.fai"
-    log:
-        "00.logs/faidx.log"
-    shell:
-        r"""
-        samtools faidx {input} > {log} 2>&1
-        test -s {output}
-        """
-rule map_normal:
-    input:
-        fastq=f"{NORMAL}.fastq",
-        ref=REF,
-        idx=rules.bwa_index.output,
-        fai=rules.faidx.output
-    output:
-        bam=f"10.bam/{NORMAL}.bam"
-    log:
-        "00.logs/map_normal.log"
-    threads: 2
-    shell:
-        r"""
-        mkdir -p 10.bam 00.logs
-        bwa mem -t {threads} {input.ref} {input.fastq} 2> {log} | samtools view -b -o {output.bam}
-        test -s {output.bam}
-        """
-rule map_tumor:
-    input:
-        fastq=f"{TUMOR}.fastq",
-        ref=REF,
-        idx=rules.bwa_index.output,
-        fai=rules.faidx.output
-    output:
-        bam=f"10.bam/{TUMOR}.bam"
-    log:
-        "00.logs/map_tumor.log"
-    threads: 2
-    shell:
-        r"""
-        mkdir -p 10.bam 00.logs
-        bwa mem -t {threads} {input.ref} {input.fastq} 2> {log} | samtools view -b -o {output.bam}
-        test -s {output.bam}
-        """
-rule sort_normal:
-    input:
-        bam=f"10.bam/{NORMAL}.bam"
-    output:
-        bam=f"20.sorted/{NORMAL}.sorted.bam",
-        bai=f"20.sorted/{NORMAL}.sorted.bam.bai"
-    log:
-        "00.logs/sort_normal.log"
-    threads: 2
-    shell:
-        r"""
-        mkdir -p 20.sorted 00.logs
-        samtools sort -@ {threads} -o {output.bam} {input.bam} > {log} 2>&1
-        samtools index {output.bam}
-        test -s {output.bam}
-        test -s {output.bai}
-        samtools quickcheck {output.bam}
-        """
-rule sort_tumor:
-    input:
-        bam=f"10.bam/{TUMOR}.bam"
-    output:
-        bam=f"20.sorted/{TUMOR}.sorted.bam",
-        bai=f"20.sorted/{TUMOR}.sorted.bam.bai"
-    log:
-        "00.logs/sort_tumor.log"
-    threads: 2
-    shell:
-        r"""
-        mkdir -p 20.sorted 00.logs
-        samtools sort -@ {threads} -o {output.bam} {input.bam} > {log} 2>&1
-        samtools index {output.bam}
-        test -s {output.bam}
-        test -s {output.bai}
-        samtools quickcheck {output.bam}
-        """
-rule call_raw_snps:
-    input:
-        tumor_bam=f"20.sorted/{TUMOR}.sorted.bam",
-        tumor_bai=f"20.sorted/{TUMOR}.sorted.bam.bai",
-        normal_bam=f"20.sorted/{NORMAL}.sorted.bam",
-        normal_bai=f"20.sorted/{NORMAL}.sorted.bam.bai",
-        ref=REF,
-        fai=rules.faidx.output
-    output:
-        "30.variants/raw_snps.vcf"
-    log:
-        "00.logs/call_raw_snps.log"
-    shell:
-        r"""
-        mkdir -p 30.variants 00.logs
-        bcftools mpileup -f {input.ref} {input.tumor_bam} {input.normal_bam} 2> {log} \
-          | bcftools call -mv -Ov -o {output} >> {log} 2>&1
-        test -s {output}
-        grep '^#CHROM' {output} >/dev/null
-        """
-rule clean_snps:
-    input:
-        "30.variants/raw_snps.vcf"
-    output:
-        "40.cleaned/clean_snps.vcf"
-    log:
-        "00.logs/clean_snps.log"
-    shell:
-        r"""
-        mkdir -p 40.cleaned 00.logs
-        bcftools view -v snps {input} | bcftools filter -e 'QUAL<20' -Ov -o {output} > {log} 2>&1
-        test -s {output}
-        grep '^#CHROM' {output} >/dev/null
-        """
-rule snpeff_annotate:
-    input:
-        "40.cleaned/clean_snps.vcf"
-    output:
-        vcf="50.annotated/annotated_snps.vcf",
-        html="50.annotated/snpEff_summary.html"
-    log:
-        "00.logs/snpeff_annotate.log"
-    shell:
-        r"""
-        mkdir -p 50.annotated 00.logs
-        java -Xmx3400m -jar {SNPEFF_JAR} eff hg19 -dataDir /staging/leuven/stg_00079/teaching/snpeff_db {input} \
-          -s {output.html} \
-          > {output.vcf} 2> {log}
-        test -s {output.vcf}
-        test -s {output.html}
-        grep '^#' {output.vcf} >/dev/null
-        grep 'ANN=' {output.vcf} >/dev/null
-        """
-rule export_final_tsv:
+        "mkdir -p 50.annotated && cp {input} {output} && test -s {output}"
+rule upload_annotated_vcf_to_mango:
     input:
         "50.annotated/annotated_snps.vcf"
     output:
-        "100.final/snps.annotated.tsv"
-    log:
-        "00.logs/export_final_tsv.log"
+        touch("00.logs/upload_annotated_vcf_to_mango.done")
     shell:
-        r"""
-        mkdir -p 100.final 00.logs
-        bcftools query -f '%CHROM\t%POS\t%REF\t%ALT\t%QUAL\t%INFO/ANN\n' {input} > {output} 2> {log}
-        test -s {output}
-        awk 'BEGIN{{FS=OFS="\t"; ok=0}} NF>=6 {{ok=1; exit}} END{{exit(ok?0:1)}}' {output}
-        """
-rule load_sqlite_db:
-    input:
-        vcf="50.annotated/annotated_snps.vcf"
-    output:
-        db="150.db/snps.sqlite"
-    log:
-        "00.logs/load_sqlite_db.log"
-    shell:
-        r"""
-        mkdir -p 150.db 00.logs
-        python scripts/vcf_to_sqlite.py --vcf {input.vcf} --db {output.db} > {log} 2>&1
-        test -s {output.db}
-        """
-rule plot_snp_figures:
-    input:
-        db="150.db/snps.sqlite"
-    output:
-        fig1="160.figures/fig1_impact_severity.svg",
-        fig2="160.figures/fig2_top_genes.svg"
-    log:
-        "00.logs/plot_snp_figures.log"
-    shell:
-        r"""
-        mkdir -p 160.figures 00.logs
-        python scripts/plot_snp_figures.py --db {input.db} --fig1 {output.fig1} --fig2 {output.fig2} > {log} 2>&1
-        """
+        "mkdir -p 00.logs; iron mkdir /gbiomed/home/large_omics_course/output/r1031919 || true; iron upload {input} /gbiomed/home/large_omics_course/output/r1031919/; touch {output}"

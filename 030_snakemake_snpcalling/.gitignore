@@ -42,16 +42,35 @@
 .snakemake/
 
 
-160.figures/*.svg
+*.fastq
 
-160.figures/*.pdf
+*.bam
 
-160.figures/*.png
+*.bai
 
-150.db/*.sqlite
+*.vcf
 
+*.sqlite
 
-TLE66_N.fastq
+01.fastqc/
 
-TLE66_T.fastq
+10.bam/
+
+20.sorted/
+
+30.variants/
+
+40.cleaned/
+
+50.annotated/
+
+100.final/
+
+150.db/
+
+00.logs/
+
+.snakemake/
+
+Snakefile.broken
 
